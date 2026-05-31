@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2026 FNIRSI-DPS-150-CONTROL Project
+// Copyright (c) 2026 Gemelon
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -102,6 +102,9 @@ namespace FNIRSI_DPS_150_CONTROL
             Console.WriteLine("│  UI SETTINGS                                                 │");
             Console.WriteLine("│  [U] Configure UI Settings (Brightness/Volume)              │");
             Console.WriteLine(new string('─', 62));
+            Console.WriteLine("│  TELEMETRY & STATUS                                          │");
+            Console.WriteLine("│  [M] Monitor Device Telemetry                               │");
+            Console.WriteLine(new string('─', 62));
             Console.WriteLine("│  CHECKSUM UTILITIES                                          │");
             Console.WriteLine("│  [C] Calculate Checksum (from packet)                       │");
             Console.WriteLine("│  [D] Verify Checksum (validate packet)                      │");
@@ -187,6 +190,9 @@ namespace FNIRSI_DPS_150_CONTROL
                     break;
                 case "U":
                     ConfigureUISettings();
+                    break;
+                case "M":
+                    MonitorTelemetry();
                     break;
                 case "C":
                     CalculateChecksum();
@@ -1262,16 +1268,191 @@ namespace FNIRSI_DPS_150_CONTROL
                                                         }
                                                         else
                                                         {
-                                                            Console.WriteLine("✗ Invalid action!");
-                                                        }
-                                                    }
+                                                                    Console.WriteLine("✗ Invalid action!");
+                                                                }
+                                                            }
 
-                                                    #endregion
+                                                            /// <summary>
+                                                            /// Comprehensive telemetry monitoring display.
+                                                            /// </summary>
+                                                            private static void MonitorTelemetry()
+                                                            {
+                                                                Console.WriteLine("┌─────────────────────────────────────────────────────────┐");
+                                                                Console.WriteLine("│ DEVICE TELEMETRY MONITOR                                │");
+                                                                Console.WriteLine("└─────────────────────────────────────────────────────────┘");
 
-                                                    #region Checksum Utilities
+                                                                if (!_control!.IsConnected)
+                                                                {
+                                                                    Console.WriteLine("✗ Not connected! Please connect to a device first.");
+                                                                    return;
+                                                                }
 
-                                                    private static void CalculateChecksum()
-                                                    {
+                                                                Console.WriteLine("\nReading all telemetry values...\n");
+
+                                                                // Device Capabilities
+                                                                Console.WriteLine("┌─────────────────────────────────────────────────────────┐");
+                                                                Console.WriteLine("│ DEVICE CAPABILITIES                                     │");
+                                                                Console.WriteLine("└─────────────────────────────────────────────────────────┘");
+
+                                                                float maxVoltage = _control.GetMaximumVoltage();
+                                                                if (maxVoltage >= 0)
+                                                                {
+                                                                    Console.WriteLine($"  Maximum Voltage:     {maxVoltage:F2} V");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Maximum Voltage:     ✗ READ FAILED");
+                                                                }
+
+                                                                float maxCurrent = _control.GetMaximumCurrent();
+                                                                if (maxCurrent >= 0)
+                                                                {
+                                                                    Console.WriteLine($"  Maximum Current:     {maxCurrent:F2} A");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Maximum Current:     ✗ READ FAILED");
+                                                                }
+
+                                                                if (maxVoltage >= 0 && maxCurrent >= 0)
+                                                                {
+                                                                    float maxPower = maxVoltage * maxCurrent;
+                                                                    Console.WriteLine($"  Maximum Power:       {maxPower:F2} W (calculated)");
+                                                                }
+
+                                                                // Power Status
+                                                                Console.WriteLine("\n┌─────────────────────────────────────────────────────────┐");
+                                                                Console.WriteLine("│ POWER STATUS                                            │");
+                                                                Console.WriteLine("└─────────────────────────────────────────────────────────┘");
+
+                                                                float inputVoltage = _control.GetInputVoltage();
+                                                                if (inputVoltage >= 0)
+                                                                {
+                                                                    Console.WriteLine($"  Input Voltage:       {inputVoltage:F2} V");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Input Voltage:       ✗ READ FAILED");
+                                                                }
+
+                                                                float temperature = _control.GetInternalTemperature();
+                                                                if (temperature >= 0)
+                                                                {
+                                                                    Console.WriteLine($"  Internal Temp:       {temperature:F2} °C");
+                                                                    if (temperature > 80)
+                                                                    {
+                                                                        Console.WriteLine("                       ⚠ WARNING: High temperature!");
+                                                                    }
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Internal Temp:       ✗ READ FAILED");
+                                                                }
+
+                                                                // Output Status
+                                                                Console.WriteLine("\n┌─────────────────────────────────────────────────────────┐");
+                                                                Console.WriteLine("│ OUTPUT STATUS                                           │");
+                                                                Console.WriteLine("└─────────────────────────────────────────────────────────┘");
+
+                                                                bool? runningMode = _control.GetRunningMode();
+                                                                if (runningMode.HasValue)
+                                                                {
+                                                                    Console.WriteLine($"  Running Mode:        {(runningMode.Value ? "✓ RUN (ON)" : "✗ STOP (OFF)")}");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Running Mode:        ✗ READ FAILED");
+                                                                }
+
+                                                                bool? cccv = _control.GetCCCV();
+                                                                if (cccv.HasValue)
+                                                                {
+                                                                    Console.WriteLine($"  Regulation Mode:     {(cccv.Value ? "CV (Constant Voltage)" : "CC (Constant Current)")}");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Regulation Mode:     ✗ READ FAILED");
+                                                                }
+
+                                                                // Measurement Data
+                                                                Console.WriteLine("\n┌─────────────────────────────────────────────────────────┐");
+                                                                Console.WriteLine("│ MEASUREMENT DATA                                        │");
+                                                                Console.WriteLine("└─────────────────────────────────────────────────────────┘");
+
+                                                                float[]? measurement = _control.GetMeasurement();
+                                                                if (measurement != null && measurement.Length == 2)
+                                                                {
+                                                                    Console.WriteLine($"  Output Voltage:      {measurement[0]:F3} V");
+                                                                    Console.WriteLine($"  Output Current:      {measurement[1]:F3} A");
+                                                                    float outputPower = measurement[0] * measurement[1];
+                                                                    Console.WriteLine($"  Output Power:        {outputPower:F3} W (calculated)");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Measurement Data:    ✗ READ FAILED");
+                                                                }
+
+                                                                // Setpoints (for comparison)
+                                                                Console.WriteLine("\n┌─────────────────────────────────────────────────────────┐");
+                                                                Console.WriteLine("│ SETPOINTS (for comparison)                              │");
+                                                                Console.WriteLine("└─────────────────────────────────────────────────────────┘");
+
+                                                                float voltageSetpoint = _control.GetVoltage();
+                                                                if (voltageSetpoint >= 0)
+                                                                {
+                                                                    Console.WriteLine($"  Voltage Setpoint:    {voltageSetpoint:F3} V");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Voltage Setpoint:    ✗ READ FAILED");
+                                                                }
+
+                                                                float currentSetpoint = _control.GetCurrent();
+                                                                if (currentSetpoint >= 0)
+                                                                {
+                                                                    Console.WriteLine($"  Current Limit:       {currentSetpoint:F3} A");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Current Limit:       ✗ READ FAILED");
+                                                                }
+
+                                                                // Energy/Capacity
+                                                                Console.WriteLine("\n┌─────────────────────────────────────────────────────────┐");
+                                                                Console.WriteLine("│ ENERGY & CAPACITY COUNTERS                              │");
+                                                                Console.WriteLine("└─────────────────────────────────────────────────────────┘");
+
+                                                                float capacity = _control.GetMeasuredCapacity();
+                                                                if (capacity >= 0)
+                                                                {
+                                                                    Console.WriteLine($"  Capacity:            {capacity:F3} Ah");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Capacity:            ✗ READ FAILED");
+                                                                }
+
+                                                                float energy = _control.GetMeasuredEnergy();
+                                                                if (energy >= 0)
+                                                                {
+                                                                    Console.WriteLine($"  Energy:              {energy:F3} Wh");
+                                                                }
+                                                                else
+                                                                {
+                                                                    Console.WriteLine("  Energy:              ✗ READ FAILED");
+                                                                }
+
+                                                                Console.WriteLine("\n" + new string('─', 62));
+                                                                Console.WriteLine("ℹ Telemetry snapshot complete");
+                                                                Console.WriteLine("ℹ The device also transmits telemetry automatically (~500ms)");
+                                                            }
+
+                                                            #endregion
+
+                                                            #region Checksum Utilities
+
+                                                            private static void CalculateChecksum()
+                                                            {
             Console.WriteLine("┌─────────────────────────────────────────────────────────┐");
             Console.WriteLine("│ CALCULATE CHECKSUM                                      │");
             Console.WriteLine("└─────────────────────────────────────────────────────────┘");

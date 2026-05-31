@@ -1,6 +1,6 @@
 ﻿// MIT License
 //
-// Copyright (c) 2026 FNIRSI-DPS-150-CONTROL Project
+// Copyright (c) 2026 Gemelon
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,15 +40,88 @@ using System.Text;
 
 namespace FNIRSI_DPS_150_CONTROL
 {
+    /// <summary>
+    /// High-level control class for the FNIRSI-DPS-150 laboratory power supply.
+    /// Provides comprehensive device control, configuration, and monitoring capabilities.
+    /// </summary>
+    /// <remarks>
+    /// This class encapsulates all device operations including:
+    /// - Connection management and session control
+    /// - Output voltage and current control
+    /// - Protection settings (OVP, OCP, OPP, OTP, LVP)
+    /// - Preset memory management (M1-M6)
+    /// - UI settings (brightness, volume)
+    /// - Telemetry and status monitoring
+    /// - Packet construction and validation
+    /// </remarks>
     public class DPS150Control
     {
+        #region Private Fields
+
+        /// <summary>
+        /// Low-level serial communication handler for the DPS-150 device.
+        /// Manages the physical serial port connection and data transmission.
+        /// </summary>
         private DPS150Communication _communication = new DPS150Communication();
+
+        /// <summary>
+        /// Register map and device configuration storage.
+        /// Contains the protocol register definitions and device state information.
+        /// </summary>
         private DPS150Registers _registers = new DPS150Registers();
+
+        /// <summary>
+        /// Tracks whether a communication session has been established with the device.
+        /// The DPS-150 requires an active session before most register operations.
+        /// Session is started with StartSession() and stopped with StopSession().
+        /// </summary>
         private bool _sessionStarted = false;
 
+        #endregion
+
+        #region Public Properties
+
+        /// <summary>
+        /// Gets an array of available serial port names on the system.
+        /// </summary>
+        /// <remarks>
+        /// This property provides a convenient way to enumerate COM ports
+        /// without creating a DPS150Communication instance.
+        /// Returns an empty array if no ports are available.
+        /// </remarks>
         public string[] AvailablePorts { get => DPS150Communication.GetAvailablePorts() ?? new string[0]; }
+
+        /// <summary>
+        /// Gets a value indicating whether the serial port connection is currently open.
+        /// </summary>
+        /// <remarks>
+        /// This property reflects the underlying serial port state.
+        /// A connection can be established using ConnectToDevice() methods.
+        /// Use this property to verify connection status before sending commands.
+        /// </remarks>
         public bool IsConnected { get => _communication.IsConnected; }
+
+        /// <summary>
+        /// Gets a value indicating whether a communication session is currently active.
+        /// </summary>
+        /// <remarks>
+        /// The DPS-150 requires an active session before accessing most registers.
+        /// A session is started with StartSession() and stopped with StopSession().
+        /// Many control methods (e.g., SetVoltage, SetCurrent) automatically start
+        /// a session if one is not already active.
+        /// 
+        /// Session lifecycle:
+        /// 1. Connect to device (IsConnected = true)
+        /// 2. Start session (IsSessionStarted = true)
+        /// 3. Perform device operations
+        /// 4. Stop session (IsSessionStarted = false)
+        /// 5. Disconnect (IsConnected = false)
+        /// </remarks>
         public bool IsSessionStarted { get => _sessionStarted; }
+
+        #endregion
+
+        #region Private Helper Methods
 
         /// <summary>
         /// Converts a float to four bytes (little-endian, IEEE-754 float32).
@@ -1494,17 +1567,19 @@ namespace FNIRSI_DPS_150_CONTROL
                 voltage = 0.0f;
                 current = 0.0f;
                 return false;
+                }
             }
-        }
 
 
 
-        #region Protection Settings (OVP, OCP, OPP, OTP, LVP)
+            #endregion
 
-        /// <summary>
-        /// Sets the Over-Voltage Protection (OVP) threshold.
-        /// </summary>
-        /// <param name="ovp">The OVP threshold in volts (typically 0-160V).</param>
+            #region Protection Settings (OVP, OCP, OPP, OTP, LVP)
+
+            /// <summary>
+            /// Sets the Over-Voltage Protection (OVP) threshold.
+            /// </summary>
+            /// <param name="ovp">The OVP threshold in volts (typically 0-160V).</param>
         /// <returns>True if the OVP was successfully set; otherwise, false.</returns>
         /// <remarks>
         /// Over-Voltage Protection automatically disables the output when the voltage exceeds this threshold.
@@ -2252,16 +2327,607 @@ namespace FNIRSI_DPS_150_CONTROL
 
         #endregion
 
-        // todo: implement telemetry getters (input voltage, max voltage, max current, internal temp, measurement, energy/capacity, running mode, CCCV)
-        //public float GetInputVoltage() { }
-        //public float GetMaximumVoltage() { }
-        //public float GetMaximumCurrent() { }
-        //public float GetInternalTemperature() { }
-        //public float[] GetMeasurement() { }
-        //public bool GetEnergyAndCapacity() { }
-        //public float GetMeasuredCapacity() { }
-        //public float GetMeasuredEnergy() { }
-        //public bool GetRunningMode() { }
-        //public bool GetCCCV() { }
+
+        #region Telemetry (Read-Only Values)
+
+        /// <summary>
+        /// Gets the input voltage (supply voltage) from the device.
+        /// </summary>
+        /// <returns>The input voltage in volts, or -1.0f if the read operation failed.</returns>
+        /// <remarks>
+        /// This method reads the actual input/supply voltage feeding the power supply.
+        /// The DPS-150 also periodically transmits telemetry data (every ~500ms).
+        /// This method automatically starts a session if one is not already active.
+        /// 
+        /// Protocol details:
+        /// - Command: F1 A1 C0 00 [checksum]
+        /// - Response: F0 A1 C0 04 [float bytes] [checksum]
+        /// - Register: 0xC0 (InputVoltage)
+        /// - Float format: IEEE-754 float32, little-endian
+        /// 
+        /// Use case: Monitor input voltage to ensure stable operation and detect power issues.
+        /// </remarks>
+        public float GetInputVoltage()
+        {
+            if (!IsConnected)
+            {
+                return -1.0f;
+            }
+
+            if (!_sessionStarted)
+            {
+                if (!StartSession())
+                {
+                    return -1.0f;
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+
+            try
+            {
+                byte[] readCommand = CreatePacket(DPS150ComDirection.TX, DPS150AccessType.Read, DPS150RegisterAddress.InputVoltage, null);
+                byte[]? response = SendCommandAndGetResponse(readCommand, 1000);
+
+                if (response == null || response.Length < 9)
+                {
+                    return -1.0f;
+                }
+
+                if (response[0] != (byte)DPS150ComDirection.RX ||
+                    response[1] != (byte)DPS150AccessType.Read ||
+                    response[2] != (byte)DPS150RegisterAddress.InputVoltage)
+                {
+                    return -1.0f;
+                }
+
+                if (!VerifyChecksum(response))
+                {
+                    return -1.0f;
+                }
+
+                return BytesToFloat(response, 4);
+            }
+            catch
+            {
+                return -1.0f;
+            }
+        }
+
+        /// <summary>
+        /// Gets the maximum voltage capability of the device.
+        /// </summary>
+        /// <returns>The maximum voltage in volts, or -1.0f if the read operation failed.</returns>
+        /// <remarks>
+        /// This method reads the device's maximum voltage specification/capability.
+        /// This is typically a fixed value based on the device model (e.g., 150V for DPS-150).
+        /// This method automatically starts a session if one is not already active.
+        /// 
+        /// Protocol details:
+        /// - Command: F1 A1 E2 00 [checksum]
+        /// - Response: F0 A1 E2 04 [float bytes] [checksum]
+        /// - Register: 0xE2 (MaximumVoltage)
+        /// - Float format: IEEE-754 float32, little-endian
+        /// 
+        /// Use case: Determine device capabilities and validate setpoint ranges.
+        /// </remarks>
+        public float GetMaximumVoltage()
+        {
+            if (!IsConnected)
+            {
+                return -1.0f;
+            }
+
+            if (!_sessionStarted)
+            {
+                if (!StartSession())
+                {
+                    return -1.0f;
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+
+            try
+            {
+                byte[] readCommand = CreatePacket(DPS150ComDirection.TX, DPS150AccessType.Read, DPS150RegisterAddress.MaximumVoltage, null);
+                byte[]? response = SendCommandAndGetResponse(readCommand, 1000);
+
+                if (response == null || response.Length < 9)
+                {
+                    return -1.0f;
+                }
+
+                if (response[0] != (byte)DPS150ComDirection.RX ||
+                    response[1] != (byte)DPS150AccessType.Read ||
+                    response[2] != (byte)DPS150RegisterAddress.MaximumVoltage)
+                {
+                    return -1.0f;
+                }
+
+                if (!VerifyChecksum(response))
+                {
+                    return -1.0f;
+                }
+
+                return BytesToFloat(response, 4);
+            }
+            catch
+            {
+                return -1.0f;
+            }
+        }
+
+        /// <summary>
+        /// Gets the maximum current capability of the device.
+        /// </summary>
+        /// <returns>The maximum current in amperes, or -1.0f if the read operation failed.</returns>
+        /// <remarks>
+        /// This method reads the device's maximum current specification/capability.
+        /// This is typically a fixed value based on the device model (e.g., 15A for DPS-150).
+        /// This method automatically starts a session if one is not already active.
+        /// 
+        /// Protocol details:
+        /// - Command: F1 A1 E3 00 [checksum]
+        /// - Response: F0 A1 E3 04 [float bytes] [checksum]
+        /// - Register: 0xE3 (MaximumCurrent)
+        /// - Float format: IEEE-754 float32, little-endian
+        /// 
+        /// Use case: Determine device capabilities and validate setpoint ranges.
+        /// </remarks>
+        public float GetMaximumCurrent()
+        {
+            if (!IsConnected)
+            {
+                return -1.0f;
+            }
+
+            if (!_sessionStarted)
+            {
+                if (!StartSession())
+                {
+                    return -1.0f;
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+
+            try
+            {
+                byte[] readCommand = CreatePacket(DPS150ComDirection.TX, DPS150AccessType.Read, DPS150RegisterAddress.MaximumCurrent, null);
+                byte[]? response = SendCommandAndGetResponse(readCommand, 1000);
+
+                if (response == null || response.Length < 9)
+                {
+                    return -1.0f;
+                }
+
+                if (response[0] != (byte)DPS150ComDirection.RX ||
+                    response[1] != (byte)DPS150AccessType.Read ||
+                    response[2] != (byte)DPS150RegisterAddress.MaximumCurrent)
+                {
+                    return -1.0f;
+                }
+
+                if (!VerifyChecksum(response))
+                {
+                    return -1.0f;
+                }
+
+                return BytesToFloat(response, 4);
+            }
+            catch
+            {
+                return -1.0f;
+            }
+        }
+
+        /// <summary>
+        /// Gets the internal temperature of the device.
+        /// </summary>
+        /// <returns>The internal temperature in degrees Celsius, or -1.0f if the read operation failed.</returns>
+        /// <remarks>
+        /// This method reads the device's internal temperature sensor.
+        /// Monitor this value to prevent overheating and ensure safe operation.
+        /// This method automatically starts a session if one is not already active.
+        /// 
+        /// Protocol details:
+        /// - Command: F1 A1 C4 00 [checksum]
+        /// - Response: F0 A1 C4 04 [float bytes] [checksum]
+        /// - Register: 0xC4 (InternalTemperature)
+        /// - Float format: IEEE-754 float32, little-endian
+        /// 
+        /// Use case: Monitor device temperature for thermal management and OTP validation.
+        /// </remarks>
+        public float GetInternalTemperature()
+        {
+            if (!IsConnected)
+            {
+                return -1.0f;
+            }
+
+            if (!_sessionStarted)
+            {
+                if (!StartSession())
+                {
+                    return -1.0f;
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+
+            try
+            {
+                byte[] readCommand = CreatePacket(DPS150ComDirection.TX, DPS150AccessType.Read, DPS150RegisterAddress.InternalTemperature, null);
+                byte[]? response = SendCommandAndGetResponse(readCommand, 1000);
+
+                if (response == null || response.Length < 9)
+                {
+                    return -1.0f;
+                }
+
+                if (response[0] != (byte)DPS150ComDirection.RX ||
+                    response[1] != (byte)DPS150AccessType.Read ||
+                    response[2] != (byte)DPS150RegisterAddress.InternalTemperature)
+                {
+                    return -1.0f;
+                }
+
+                if (!VerifyChecksum(response))
+                {
+                    return -1.0f;
+                }
+
+                return BytesToFloat(response, 4);
+            }
+            catch
+            {
+                return -1.0f;
+            }
+        }
+
+        /// <summary>
+        /// Gets the current measurement data from the device (voltage and current).
+        /// </summary>
+        /// <returns>A float array containing [voltage, current], or null if the read operation failed.</returns>
+        /// <remarks>
+        /// This method reads the actual measured output values (not setpoints).
+        /// The returned array contains:
+        /// - [0]: Measured output voltage in volts
+        /// - [1]: Measured output current in amperes
+        /// 
+        /// This method automatically starts a session if one is not already active.
+        /// 
+        /// Protocol details:
+        /// - Command: F1 A1 C3 00 [checksum]
+        /// - Response: F0 A1 C3 08 [voltage float] [current float] [checksum]
+        /// - Register: 0xC3 (Measurement)
+        /// - Data format: Two IEEE-754 float32 values, little-endian (8 bytes total)
+        /// 
+        /// Use case: Monitor actual output voltage and current for regulation verification.
+        /// </remarks>
+        public float[]? GetMeasurement()
+        {
+            if (!IsConnected)
+            {
+                return null;
+            }
+
+            if (!_sessionStarted)
+            {
+                if (!StartSession())
+                {
+                    return null;
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+
+            try
+            {
+                byte[] readCommand = CreatePacket(DPS150ComDirection.TX, DPS150AccessType.Read, DPS150RegisterAddress.Measurement, null);
+                byte[]? response = SendCommandAndGetResponse(readCommand, 1000);
+
+                // Expected response: F0 A1 C3 08 [4 voltage bytes] [4 current bytes] [checksum] = 13 bytes
+                if (response == null || response.Length < 13)
+                {
+                    return null;
+                }
+
+                if (response[0] != (byte)DPS150ComDirection.RX ||
+                    response[1] != (byte)DPS150AccessType.Read ||
+                    response[2] != (byte)DPS150RegisterAddress.Measurement)
+                {
+                    return null;
+                }
+
+                if (!VerifyChecksum(response))
+                {
+                    return null;
+                }
+
+                // Extract two float values
+                float voltage = BytesToFloat(response, 4);
+                float current = BytesToFloat(response, 8);
+
+                return new float[] { voltage, current };
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets the measured capacity (Ah) from the device.
+        /// </summary>
+        /// <returns>The measured capacity in ampere-hours (Ah), or -1.0f if the read operation failed.</returns>
+        /// <remarks>
+        /// This method reads the accumulated charge capacity since the last reset.
+        /// Useful for battery charging/discharging applications.
+        /// This method automatically starts a session if one is not already active.
+        /// 
+        /// Protocol details:
+        /// - Command: F1 A1 D9 00 [checksum]
+        /// - Response: F0 A1 D9 04 [float bytes] [checksum]
+        /// - Register: 0xD9 (MeasuredCapacity)
+        /// - Float format: IEEE-754 float32, little-endian
+        /// 
+        /// Use case: Battery capacity testing, charge monitoring.
+        /// </remarks>
+        public float GetMeasuredCapacity()
+        {
+            if (!IsConnected)
+            {
+                return -1.0f;
+            }
+
+            if (!_sessionStarted)
+            {
+                if (!StartSession())
+                {
+                    return -1.0f;
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+
+            try
+            {
+                byte[] readCommand = CreatePacket(DPS150ComDirection.TX, DPS150AccessType.Read, DPS150RegisterAddress.MeasuredCapacity, null);
+                byte[]? response = SendCommandAndGetResponse(readCommand, 1000);
+
+                if (response == null || response.Length < 9)
+                {
+                    return -1.0f;
+                }
+
+                if (response[0] != (byte)DPS150ComDirection.RX ||
+                    response[1] != (byte)DPS150AccessType.Read ||
+                    response[2] != (byte)DPS150RegisterAddress.MeasuredCapacity)
+                {
+                    return -1.0f;
+                }
+
+                if (!VerifyChecksum(response))
+                {
+                    return -1.0f;
+                }
+
+                return BytesToFloat(response, 4);
+            }
+            catch
+            {
+                return -1.0f;
+            }
+        }
+
+        /// <summary>
+        /// Gets the measured energy (Wh) from the device.
+        /// </summary>
+        /// <returns>The measured energy in watt-hours (Wh), or -1.0f if the read operation failed.</returns>
+        /// <remarks>
+        /// This method reads the accumulated energy consumption since the last reset.
+        /// Useful for power consumption monitoring and testing.
+        /// This method automatically starts a session if one is not already active.
+        /// 
+        /// Protocol details:
+        /// - Command: F1 A1 DA 00 [checksum]
+        /// - Response: F0 A1 DA 04 [float bytes] [checksum]
+        /// - Register: 0xDA (MeasuredEnergy)
+        /// - Float format: IEEE-754 float32, little-endian
+        /// 
+        /// Use case: Energy consumption monitoring, efficiency testing.
+        /// </remarks>
+        public float GetMeasuredEnergy()
+        {
+            if (!IsConnected)
+            {
+                return -1.0f;
+            }
+
+            if (!_sessionStarted)
+            {
+                if (!StartSession())
+                {
+                    return -1.0f;
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+
+            try
+            {
+                byte[] readCommand = CreatePacket(DPS150ComDirection.TX, DPS150AccessType.Read, DPS150RegisterAddress.MeasuredEnergy, null);
+                byte[]? response = SendCommandAndGetResponse(readCommand, 1000);
+
+                if (response == null || response.Length < 9)
+                {
+                    return -1.0f;
+                }
+
+                if (response[0] != (byte)DPS150ComDirection.RX ||
+                    response[1] != (byte)DPS150AccessType.Read ||
+                    response[2] != (byte)DPS150RegisterAddress.MeasuredEnergy)
+                {
+                    return -1.0f;
+                }
+
+                if (!VerifyChecksum(response))
+                {
+                    return -1.0f;
+                }
+
+                return BytesToFloat(response, 4);
+            }
+            catch
+            {
+                return -1.0f;
+            }
+        }
+
+        /// <summary>
+        /// Gets the running mode (output state) of the device.
+        /// </summary>
+        /// <returns>True if the output is running (ON), false if stopped (OFF), or null if the read operation failed.</returns>
+        /// <remarks>
+        /// This method reads the current output relay state.
+        /// The device automatically sends this frame when the running mode changes.
+        /// This method automatically starts a session if one is not already active.
+        /// 
+        /// Protocol details:
+        /// - Command: F1 A1 DB 00 [checksum]
+        /// - Response: F0 A1 DB 04 [int32 bytes] [checksum]
+        /// - Register: 0xDB (RunningMode)
+        /// - Data format: 32-bit integer (0 = STOP, 1 = RUN)
+        /// 
+        /// Use case: Monitor output state, verify relay commands.
+        /// </remarks>
+        public bool? GetRunningMode()
+        {
+            if (!IsConnected)
+            {
+                return null;
+            }
+
+            if (!_sessionStarted)
+            {
+                if (!StartSession())
+                {
+                    return null;
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+
+            try
+            {
+                byte[] readCommand = CreatePacket(DPS150ComDirection.TX, DPS150AccessType.Read, DPS150RegisterAddress.RunningMode, null);
+                byte[]? response = SendCommandAndGetResponse(readCommand, 1000);
+
+                if (response == null || response.Length < 9)
+                {
+                    return null;
+                }
+
+                if (response[0] != (byte)DPS150ComDirection.RX ||
+                    response[1] != (byte)DPS150AccessType.Read ||
+                    response[2] != (byte)DPS150RegisterAddress.RunningMode)
+                {
+                    return null;
+                }
+
+                if (!VerifyChecksum(response))
+                {
+                    return null;
+                }
+
+                // Extract int32 value (bytes 4-7)
+                byte[] intBytes = new byte[4];
+                Array.Copy(response, 4, intBytes, 0, 4);
+
+                if (!BitConverter.IsLittleEndian)
+                {
+                    Array.Reverse(intBytes);
+                }
+
+                int mode = BitConverter.ToInt32(intBytes, 0);
+                return mode == 1; // 0 = STOP, 1 = RUN
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets the CC/CV mode of the device.
+        /// </summary>
+        /// <returns>True if in CV (Constant Voltage) mode, false if in CC (Constant Current) mode, or null if the read operation failed.</returns>
+        /// <remarks>
+        /// This method reads the current regulation mode of the power supply:
+        /// - CC (Constant Current): Current limit is reached, voltage is regulated
+        /// - CV (Constant Voltage): Voltage setpoint is reached, current is below limit
+        /// 
+        /// The device automatically sends this frame when the mode changes.
+        /// This method automatically starts a session if one is not already active.
+        /// 
+        /// Protocol details:
+        /// - Command: F1 A1 DD 00 [checksum]
+        /// - Response: F0 A1 DD 04 [int32 bytes] [checksum]
+        /// - Register: 0xDD (CCCV)
+        /// - Data format: 32-bit integer (0 = CC, 1 = CV)
+        /// 
+        /// Use case: Monitor regulation mode, verify load behavior.
+        /// </remarks>
+        public bool? GetCCCV()
+        {
+            if (!IsConnected)
+            {
+                return null;
+            }
+
+            if (!_sessionStarted)
+            {
+                if (!StartSession())
+                {
+                    return null;
+                }
+                System.Threading.Thread.Sleep(50);
+            }
+
+            try
+            {
+                byte[] readCommand = CreatePacket(DPS150ComDirection.TX, DPS150AccessType.Read, DPS150RegisterAddress.CCCV, null);
+                byte[]? response = SendCommandAndGetResponse(readCommand, 1000);
+
+                if (response == null || response.Length < 9)
+                {
+                    return null;
+                }
+
+                if (response[0] != (byte)DPS150ComDirection.RX ||
+                    response[1] != (byte)DPS150AccessType.Read ||
+                    response[2] != (byte)DPS150RegisterAddress.CCCV)
+                {
+                    return null;
+                }
+
+                if (!VerifyChecksum(response))
+                {
+                    return null;
+                }
+
+                // Extract int32 value (bytes 4-7)
+                byte[] intBytes = new byte[4];
+                Array.Copy(response, 4, intBytes, 0, 4);
+
+                if (!BitConverter.IsLittleEndian)
+                {
+                    Array.Reverse(intBytes);
+                }
+
+                int mode = BitConverter.ToInt32(intBytes, 0);
+                return mode == 1; // 0 = CC (Constant Current), 1 = CV (Constant Voltage)
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        #endregion
     }
 }
