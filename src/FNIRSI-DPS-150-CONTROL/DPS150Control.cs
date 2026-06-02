@@ -40,49 +40,33 @@ namespace FNIRSI_DPS_150_CONTROL
 {
     /// <summary>
     /// High-level control class for the FNIRSI-DPS-150 laboratory power supply.
-    /// This class is a facade/wrapper around DPS150Registers, providing a backward-compatible
-    /// API while delegating all operations to the property-based register abstraction.
+    /// Inherits from DPS150Registers and provides additional convenience methods 
+    /// with simplified return types (bool for success/failure) for easier integration.
     /// </summary>
     /// <remarks>
-    /// This class provides:
+    /// This class extends DPS150Registers with:
+    /// - Simplified connection management (string-based port names or numbers)
+    /// - Convenience methods with bool return values for error handling
+    /// - Backward-compatible API for existing applications
+    /// - Additional helper methods for common operations
+    /// 
+    /// All DPS150Registers properties and methods are directly accessible:
     /// - Connection management and session control
-    /// - Output voltage and current control
+    /// - Output voltage and current control via properties
     /// - Protection settings (OVP, OCP, OPP, OTP, LVP)
     /// - Preset memory management (M1-M6)
     /// - UI settings (brightness, volume)
     /// - Telemetry and status monitoring
-    /// 
-    /// All operations are delegated to the underlying DPS150Registers instance,
-    /// which provides a modern property-based API with automatic read-back verification.
+    /// - TelemetryUpdated event for real-time data updates
     /// </remarks>
-    public class DPS150Control
+    public class DPS150Control : DPS150Registers
     {
-        #region Private Fields
-
-        /// <summary>
-        /// High-level register abstraction layer for the DPS-150 device.
-        /// Manages device state, register operations, and communication.
-        /// </summary>
-        private readonly DPS150Registers _registers = new DPS150Registers();
-
-        #endregion
-
         #region Public Properties
 
         /// <summary>
         /// Gets an array of available serial port names on the system.
         /// </summary>
         public string[] AvailablePorts => DPS150Registers.GetAvailablePorts();
-
-        /// <summary>
-        /// Gets a value indicating whether the serial port connection is currently open.
-        /// </summary>
-        public bool IsConnected => _registers.IsConnected;
-
-        /// <summary>
-        /// Gets a value indicating whether a communication session is currently active.
-        /// </summary>
-        public bool IsSessionStarted => _registers.IsSessionStarted;
 
         #endregion
 
@@ -91,69 +75,38 @@ namespace FNIRSI_DPS_150_CONTROL
         /// <summary>
         /// Connects to the DPS-150 device on the specified serial port.
         /// </summary>
-        /// <param name="portName">The name of the COM port (e.g., "COM3").</param>
+        /// <param name="portName">The name of the COM port (e.g., "COM3") or a port number as string.</param>
         /// <returns>True if connection was successful.</returns>
+        /// <remarks>
+        /// This method provides flexible port selection:
+        /// - If portName is a COM port name (e.g., "COM3"), connects directly to that port
+        /// - If portName is a numeric string (e.g., "1", "2"), connects using port index
+        /// </remarks>
         public bool ConnectToDevice(string portName)
         {
             if (string.IsNullOrWhiteSpace(portName))
                 return false;
 
             // Try as port name first
-            if (_registers._communication.Connect(portName))
+            if (_communication.Connect(portName))
                 return true;
 
             // If that fails, try as port number
             if (int.TryParse(portName, out int portNumber))
             {
-                return _registers.ConnectToDevice(portNumber);
+                return base.ConnectToDevice(portNumber);
             }
 
             return false;
         }
 
         /// <summary>
-        /// Connects to the DPS-150 device using a port number (1-based index).
-        /// </summary>
-        /// <param name="portNumber">Port number (1 = first available port).</param>
-        /// <returns>True if connection was successful.</returns>
-        public bool ConnectToDevice(int portNumber)
-        {
-            return _registers.ConnectToDevice(portNumber);
-        }
-
-        /// <summary>
-        /// Disconnects from the DPS-150 device and closes the serial port.
-        /// </summary>
-        public void DisconnectFromDevice()
-        {
-            _registers.DisconnectFromDevice();
-        }
-
-        /// <summary>
-        /// Starts a communication session with the device.
-        /// </summary>
-        /// <returns>True if session started successfully.</returns>
-        public bool StartSession()
-        {
-            return _registers.StartSession();
-        }
-
-        /// <summary>
-        /// Stops the communication session with the device.
-        /// </summary>
-        /// <returns>True if session stopped successfully.</returns>
-        public bool StopSession()
-        {
-            return _registers.StopSession();
-        }
-
-        /// <summary>
         /// Flushes the serial port buffers.
         /// </summary>
         /// <returns>True if successful (always returns true for compatibility).</returns>
-        public bool FlushBuffers()
+        public new bool FlushBuffers()
         {
-            _registers.FlushBuffers();
+            base.FlushBuffers();
             return true;
         }
 
@@ -169,7 +122,7 @@ namespace FNIRSI_DPS_150_CONTROL
 
             try
             {
-                return _registers._communication.SendData(data);
+                return _communication.SendData(data);
             }
             catch
             {
@@ -189,7 +142,7 @@ namespace FNIRSI_DPS_150_CONTROL
 
             try
             {
-                return _registers._communication.ReadResponse(timeoutMs);
+                return _communication.ReadResponse(timeoutMs);
             }
             catch
             {
@@ -210,7 +163,7 @@ namespace FNIRSI_DPS_150_CONTROL
 
             try
             {
-                return _registers._communication.SendDataAndGetResponse(data, timeoutMs);
+                return _communication.SendDataAndGetResponse(data, timeoutMs);
             }
             catch
             {
@@ -231,7 +184,7 @@ namespace FNIRSI_DPS_150_CONTROL
         {
             try
             {
-                _registers.OutputRelayState = (state == OutputRelayState.ON);
+                base.OutputRelayState = (state == FNIRSI_DPS_150_CONTROL.OutputRelayState.ON);
                 return true;
             }
             catch
@@ -243,13 +196,13 @@ namespace FNIRSI_DPS_150_CONTROL
         /// <summary>
         /// Sets the voltage setpoint.
         /// </summary>
-        /// <param name="voltage">Voltage in volts (0.0 - 150.0V).</param>
+        /// <param name="voltage">Voltage in volts (0.0 - 30.0V).</param>
         /// <returns>True if successful.</returns>
         public bool SetVoltage(float voltage)
         {
             try
             {
-                _registers.VoltageSetpoint = voltage;
+                VoltageSetpoint = voltage;
                 return true;
             }
             catch
@@ -264,19 +217,19 @@ namespace FNIRSI_DPS_150_CONTROL
         /// <returns>Voltage in volts.</returns>
         public float GetVoltage()
         {
-            return _registers.VoltageSetpoint;
+            return VoltageSetpoint;
         }
 
         /// <summary>
         /// Sets the current limit.
         /// </summary>
-        /// <param name="current">Current in amperes (0.0 - 15.0A).</param>
+        /// <param name="current">Current in amperes (0.0 - 5.0A).</param>
         /// <returns>True if successful.</returns>
         public bool SetCurrent(float current)
         {
             try
             {
-                _registers.CurrentLimit = current;
+                CurrentLimit = current;
                 return true;
             }
             catch
@@ -291,7 +244,7 @@ namespace FNIRSI_DPS_150_CONTROL
         /// <returns>Current in amperes.</returns>
         public float GetCurrent()
         {
-            return _registers.CurrentLimit;
+            return CurrentLimit;
         }
 
         #endregion
@@ -312,28 +265,28 @@ namespace FNIRSI_DPS_150_CONTROL
                 switch (presetNumber)
                 {
                     case 1:
-                        _registers.PresetM1Voltage = voltage;
-                        _registers.PresetM1Current = current;
+                        PresetM1Voltage = voltage;
+                        PresetM1Current = current;
                         break;
                     case 2:
-                        _registers.PresetM2Voltage = voltage;
-                        _registers.PresetM2Current = current;
+                        PresetM2Voltage = voltage;
+                        PresetM2Current = current;
                         break;
                     case 3:
-                        _registers.PresetM3Voltage = voltage;
-                        _registers.PresetM3Current = current;
+                        PresetM3Voltage = voltage;
+                        PresetM3Current = current;
                         break;
                     case 4:
-                        _registers.PresetM4Voltage = voltage;
-                        _registers.PresetM4Current = current;
+                        PresetM4Voltage = voltage;
+                        PresetM4Current = current;
                         break;
                     case 5:
-                        _registers.PresetM5Voltage = voltage;
-                        _registers.PresetM5Current = current;
+                        PresetM5Voltage = voltage;
+                        PresetM5Current = current;
                         break;
                     case 6:
-                        _registers.PresetM6Voltage = voltage;
-                        _registers.PresetM6Current = current;
+                        PresetM6Voltage = voltage;
+                        PresetM6Current = current;
                         break;
                     default:
                         return false;
@@ -363,28 +316,28 @@ namespace FNIRSI_DPS_150_CONTROL
                 switch (presetNumber)
                 {
                     case 1:
-                        voltage = _registers.PresetM1Voltage;
-                        current = _registers.PresetM1Current;
+                        voltage = PresetM1Voltage;
+                        current = PresetM1Current;
                         break;
                     case 2:
-                        voltage = _registers.PresetM2Voltage;
-                        current = _registers.PresetM2Current;
+                        voltage = PresetM2Voltage;
+                        current = PresetM2Current;
                         break;
                     case 3:
-                        voltage = _registers.PresetM3Voltage;
-                        current = _registers.PresetM3Current;
+                        voltage = PresetM3Voltage;
+                        current = PresetM3Current;
                         break;
                     case 4:
-                        voltage = _registers.PresetM4Voltage;
-                        current = _registers.PresetM4Current;
+                        voltage = PresetM4Voltage;
+                        current = PresetM4Current;
                         break;
                     case 5:
-                        voltage = _registers.PresetM5Voltage;
-                        current = _registers.PresetM5Current;
+                        voltage = PresetM5Voltage;
+                        current = PresetM5Current;
                         break;
                     case 6:
-                        voltage = _registers.PresetM6Voltage;
-                        current = _registers.PresetM6Current;
+                        voltage = PresetM6Voltage;
+                        current = PresetM6Current;
                         break;
                     default:
                         return false;
@@ -406,65 +359,65 @@ namespace FNIRSI_DPS_150_CONTROL
         /// </summary>
         public bool SetOVP(float ovp)
         {
-            try { _registers.OVP = ovp; return true; } catch { return false; }
+            try { OVP = ovp; return true; } catch { return false; }
         }
 
         /// <summary>
         /// Gets Over-Voltage Protection (OVP) threshold.
         /// </summary>
-        public float GetOVP() => _registers.OVP;
+        public float GetOVP() => OVP;
 
         /// <summary>
         /// Sets Over-Current Protection (OCP) threshold.
         /// </summary>
         public bool SetOCP(float ocp)
         {
-            try { _registers.OCP = ocp; return true; } catch { return false; }
+            try { OCP = ocp; return true; } catch { return false; }
         }
 
         /// <summary>
         /// Gets Over-Current Protection (OCP) threshold.
         /// </summary>
-        public float GetOCP() => _registers.OCP;
+        public float GetOCP() => OCP;
 
         /// <summary>
         /// Sets Over-Power Protection (OPP) threshold.
         /// </summary>
         public bool SetOPP(float opp)
         {
-            try { _registers.OPP = opp; return true; } catch { return false; }
+            try { OPP = opp; return true; } catch { return false; }
         }
 
         /// <summary>
         /// Gets Over-Power Protection (OPP) threshold.
         /// </summary>
-        public float GetOPP() => _registers.OPP;
+        public float GetOPP() => OPP;
 
         /// <summary>
         /// Sets Over-Temperature Protection (OTP) threshold.
         /// </summary>
         public bool SetOTP(float otp)
         {
-            try { _registers.OTP = otp; return true; } catch { return false; }
+            try { OTP = otp; return true; } catch { return false; }
         }
 
         /// <summary>
         /// Gets Over-Temperature Protection (OTP) threshold.
         /// </summary>
-        public float GetOTP() => _registers.OTP;
+        public float GetOTP() => OTP;
 
         /// <summary>
         /// Sets Low-Voltage Protection (LVP) threshold.
         /// </summary>
         public bool SetLVP(float lvp)
         {
-            try { _registers.LVP = lvp; return true; } catch { return false; }
+            try { LVP = lvp; return true; } catch { return false; }
         }
 
         /// <summary>
         /// Gets Low-Voltage Protection (LVP) threshold.
         /// </summary>
-        public float GetLVP() => _registers.LVP;
+        public float GetLVP() => LVP;
 
         #endregion
 
@@ -476,13 +429,13 @@ namespace FNIRSI_DPS_150_CONTROL
         /// <param name="brightness">Brightness level (0-100).</param>
         public bool SetBrightness(int brightness)
         {
-            try { _registers.Brightness = (byte)brightness; return true; } catch { return false; }
+            try { Brightness = (byte)brightness; return true; } catch { return false; }
         }
 
         /// <summary>
         /// Gets the display brightness.
         /// </summary>
-        public int GetBrightness() => _registers.Brightness;
+        public int GetBrightness() => Brightness;
 
         /// <summary>
         /// Sets the audio volume.
@@ -490,13 +443,13 @@ namespace FNIRSI_DPS_150_CONTROL
         /// <param name="volume">Volume level (0-100).</param>
         public bool SetVolume(int volume)
         {
-            try { _registers.Volume = (byte)volume; return true; } catch { return false; }
+            try { Volume = (byte)volume; return true; } catch { return false; }
         }
 
         /// <summary>
         /// Gets the audio volume.
         /// </summary>
-        public int GetVolume() => _registers.Volume;
+        public int GetVolume() => Volume;
 
         #endregion
 
@@ -505,22 +458,22 @@ namespace FNIRSI_DPS_150_CONTROL
         /// <summary>
         /// Gets the input voltage.
         /// </summary>
-        public float GetInputVoltage() => _registers.InputVoltage;
+        public float GetInputVoltage() => InputVoltage;
 
         /// <summary>
         /// Gets the maximum voltage setting.
         /// </summary>
-        public float GetMaximumVoltage() => _registers.MaximumVoltage;
+        public float GetMaximumVoltage() => MaximumVoltage;
 
         /// <summary>
         /// Gets the maximum current setting.
         /// </summary>
-        public float GetMaximumCurrent() => _registers.MaximumCurrent;
+        public float GetMaximumCurrent() => MaximumCurrent;
 
         /// <summary>
         /// Gets the internal temperature.
         /// </summary>
-        public float GetInternalTemperature() => _registers.InternalTemperature;
+        public float GetInternalTemperature() => InternalTemperature;
 
         /// <summary>
         /// Gets measurement values (voltage, current, power).
@@ -530,31 +483,31 @@ namespace FNIRSI_DPS_150_CONTROL
         {
             return new float[] 
             { 
-                _registers.MeasuredVoltage, 
-                _registers.MeasuredCurrent, 
-                _registers.MeasuredPower 
+                MeasuredVoltage, 
+                MeasuredCurrent, 
+                MeasuredPower 
             };
         }
 
         /// <summary>
         /// Gets the measured capacity.
         /// </summary>
-        public float GetMeasuredCapacity() => _registers.MeasuredCapacity;
+        public float GetMeasuredCapacity() => MeasuredCapacity;
 
         /// <summary>
         /// Gets the measured energy.
         /// </summary>
-        public float GetMeasuredEnergy() => _registers.MeasuredEnergy;
+        public float GetMeasuredEnergy() => MeasuredEnergy;
 
         /// <summary>
         /// Gets the running mode (STOP/RUN).
         /// </summary>
-        public bool? GetRunningMode() => _registers.RunningMode;
+        public bool? GetRunningMode() => RunningMode;
 
         /// <summary>
         /// Gets the CC/CV mode.
         /// </summary>
-        public bool? GetCCCV() => _registers.CCCV;
+        public bool? GetCCCV() => CCCV;
 
         #endregion
 

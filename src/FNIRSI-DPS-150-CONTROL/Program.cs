@@ -365,7 +365,7 @@ namespace FNIRSI_DPS_150_CONTROL
             Console.WriteLine($"\n[TEST] Sending command and waiting for response...");
             Console.WriteLine($"Command: {BitConverter.ToString(command).Replace("-", " ")}");
 
-            byte[]? response = _communication.SendCommandAndGetResponse(command, timeout);
+            byte[]? response = _communication.SendDataAndGetResponse(command, timeout);
 
             if (response != null && response.Length > 0)
             {

@@ -211,6 +211,35 @@ namespace FNIRSI_DPS_150_CONTROL
         private bool _cccv;
 
         /// <summary>
+        /// Event raised when telemetry data has been successfully received and parsed from the device.
+        /// </summary>
+        /// <remarks>
+        /// This event is automatically triggered when:
+        /// 1. Data is received via the DataReceived event from DPS150Communication
+        /// 2. The received data is successfully parsed using ParseTelemetryFrames
+        /// 3. At least one telemetry value was updated
+        /// 
+        /// The event provides access to all current telemetry values including voltage, current, 
+        /// power, temperature, capacity, energy, and device status information.
+        /// 
+        /// Subscribe to this event to receive real-time updates of device telemetry data.
+        /// </remarks>
+        public event EventHandler<TelemetryUpdatedEventArgs>? TelemetryUpdated;
+
+        /// <summary>
+        /// Initializes a new instance of the DPS150Registers class.
+        /// </summary>
+        /// <remarks>
+        /// The constructor automatically subscribes to the DataReceived event from the
+        /// internal communication layer to enable automatic telemetry parsing and event raising.
+        /// </remarks>
+        public DPS150Registers()
+        {
+            // Subscribe to the DataReceived event to automatically parse telemetry data
+            _communication.DataReceived += OnCommunicationDataReceived;
+        }
+
+        /// <summary>
         /// Gets a value indicating whether the serial port connection is currently open.
         /// </summary>
         /// <remarks>
@@ -623,6 +652,77 @@ namespace FNIRSI_DPS_150_CONTROL
             }
 
             return parsedAtLeastOne;
+        }
+
+        /// <summary>
+        /// Handles the DataReceived event from DPS150Communication.
+        /// Parses incoming telemetry data and triggers the TelemetryUpdated event on success.
+        /// </summary>
+        /// <param name="sender">The event sender (DPS150Communication instance).</param>
+        /// <param name="e">Event arguments containing the received data.</param>
+        /// <remarks>
+        /// This method is automatically called when data is received from the device.
+        /// It performs the following steps:
+        /// 1. Validates that data was received
+        /// 2. Calls ParseTelemetryFrames to parse and update telemetry registers
+        /// 3. If parsing was successful, raises the TelemetryUpdated event with current values
+        /// 
+        /// The method is thread-safe and handles exceptions internally to prevent
+        /// communication disruption.
+        /// </remarks>
+        private void OnCommunicationDataReceived(object? sender, DataReceivedEventArgs e)
+        {
+            try
+            {
+                // Check if data was received
+                if (e.Data == null || e.Data.Length == 0)
+                {
+                    return;
+                }
+
+                // Parse the telemetry frames
+                bool parseSuccess = ParseTelemetryFrames(e.Data);
+
+                // If parsing was successful, raise the TelemetryUpdated event
+                if (parseSuccess)
+                {
+                    OnTelemetryUpdated();
+                }
+            }
+            catch
+            {
+                // Suppress exceptions to avoid disrupting communication
+                // The communication layer continues to work even if parsing fails
+            }
+        }
+
+        /// <summary>
+        /// Raises the TelemetryUpdated event with the current telemetry values.
+        /// </summary>
+        /// <remarks>
+        /// This method creates a TelemetryUpdatedEventArgs instance with all current
+        /// telemetry values and invokes all registered event handlers.
+        /// 
+        /// The method is called automatically by OnCommunicationDataReceived when
+        /// telemetry data has been successfully parsed and updated.
+        /// 
+        /// Event handlers are invoked synchronously on the same thread that received the data.
+        /// </remarks>
+        protected virtual void OnTelemetryUpdated()
+        {
+            TelemetryUpdated?.Invoke(this, new TelemetryUpdatedEventArgs(
+                _measuredVoltage,
+                _measuredCurrent,
+                _measuredPower,
+                _inputVoltage,
+                _maximumVoltage,
+                _maximumCurrent,
+                _internalTemperature,
+                _measuredCapacity,
+                _measuredEnergy,
+                _runningMode,
+                _protectionMode,
+                _cccv));
         }
 
         /// <summary>
@@ -1095,7 +1195,7 @@ namespace FNIRSI_DPS_150_CONTROL
         /// Gets or sets the voltage setpoint (target output voltage) for the DPS-150 device.
         /// </summary>
         /// <value>
-        /// The voltage setpoint in volts (V). Valid range is typically 0.0V to 150.0V.
+        /// The voltage setpoint in volts (V). Valid range is typically 0.0V to 30.0V.
         /// </value>
         /// <remarks>
         /// Setting this property:
@@ -1150,7 +1250,7 @@ namespace FNIRSI_DPS_150_CONTROL
         /// Gets or sets the current limit (maximum output current) for the DPS-150 device.
         /// </summary>
         /// <value>
-        /// The current limit in amperes (A). Valid range is typically 0.0A to 15.0A.
+        /// The current limit in amperes (A). Valid range is typically 0.0A to 5.0A.
         /// </value>
         /// <remarks>
         /// Setting this property:
@@ -1664,4 +1764,125 @@ namespace FNIRSI_DPS_150_CONTROL
         /// </remarks>
         public bool CCCV => _cccv;
     }
+
+    /// <summary>
+    /// Event arguments for telemetry data updates from the DPS-150 device.
+    /// Provides access to all telemetry values that were successfully parsed and updated.
+    /// </summary>
+    public class TelemetryUpdatedEventArgs : EventArgs
+    {
+        /// <summary>
+        /// Gets the measured output voltage in volts (V).
+        /// </summary>
+        public float MeasuredVoltage { get; }
+
+        /// <summary>
+        /// Gets the measured output current in amperes (A).
+        /// </summary>
+        public float MeasuredCurrent { get; }
+
+        /// <summary>
+        /// Gets the measured output power in watts (W).
+        /// </summary>
+        public float MeasuredPower { get; }
+
+        /// <summary>
+        /// Gets the input voltage in volts (V).
+        /// </summary>
+        public float InputVoltage { get; }
+
+        /// <summary>
+        /// Gets the maximum voltage capability in volts (V).
+        /// </summary>
+        public float MaximumVoltage { get; }
+
+        /// <summary>
+        /// Gets the maximum current capability in amperes (A).
+        /// </summary>
+        public float MaximumCurrent { get; }
+
+        /// <summary>
+        /// Gets the internal temperature in degrees Celsius (°C).
+        /// </summary>
+        public float InternalTemperature { get; }
+
+        /// <summary>
+        /// Gets the measured capacity in ampere-hours (Ah).
+        /// </summary>
+        public float MeasuredCapacity { get; }
+
+        /// <summary>
+        /// Gets the measured energy in watt-hours (Wh).
+        /// </summary>
+        public float MeasuredEnergy { get; }
+
+        /// <summary>
+        /// Gets the running mode of the device.
+        /// </summary>
+        /// <remarks>
+        /// false = STOP (output disabled), true = RUN (output enabled)
+        /// </remarks>
+        public bool RunningMode { get; }
+
+        /// <summary>
+        /// Gets the current protection mode status.
+        /// </summary>
+        /// <remarks>
+        /// Indicates which protection (if any) has been triggered:
+        /// OK=0, OVP=1, OCP=2, OPP=3, OTP=4, LVP=5, REP=6
+        /// </remarks>
+        public DPS150ProtectionMode ProtectionMode { get; }
+
+        /// <summary>
+        /// Gets the current CC/CV mode.
+        /// </summary>
+        /// <remarks>
+        /// false = CC (Constant Current mode), true = CV (Constant Voltage mode)
+        /// </remarks>
+        public bool CCCV { get; }
+
+        /// <summary>
+        /// Initializes a new instance of the TelemetryUpdatedEventArgs class.
+        /// </summary>
+        /// <param name="measuredVoltage">The measured output voltage.</param>
+        /// <param name="measuredCurrent">The measured output current.</param>
+        /// <param name="measuredPower">The measured output power.</param>
+        /// <param name="inputVoltage">The input voltage.</param>
+        /// <param name="maximumVoltage">The maximum voltage capability.</param>
+        /// <param name="maximumCurrent">The maximum current capability.</param>
+        /// <param name="internalTemperature">The internal temperature.</param>
+        /// <param name="measuredCapacity">The measured capacity.</param>
+        /// <param name="measuredEnergy">The measured energy.</param>
+        /// <param name="runningMode">The running mode.</param>
+        /// <param name="protectionMode">The protection mode status.</param>
+        /// <param name="cccv">The CC/CV mode.</param>
+        public TelemetryUpdatedEventArgs(
+            float measuredVoltage,
+            float measuredCurrent,
+            float measuredPower,
+            float inputVoltage,
+            float maximumVoltage,
+            float maximumCurrent,
+            float internalTemperature,
+            float measuredCapacity,
+            float measuredEnergy,
+            bool runningMode,
+            DPS150ProtectionMode protectionMode,
+            bool cccv)
+        {
+            MeasuredVoltage = measuredVoltage;
+            MeasuredCurrent = measuredCurrent;
+            MeasuredPower = measuredPower;
+            InputVoltage = inputVoltage;
+            MaximumVoltage = maximumVoltage;
+            MaximumCurrent = maximumCurrent;
+            InternalTemperature = internalTemperature;
+            MeasuredCapacity = measuredCapacity;
+            MeasuredEnergy = measuredEnergy;
+            RunningMode = runningMode;
+            ProtectionMode = protectionMode;
+            CCCV = cccv;
+        }
+    }
+
 }

@@ -6,7 +6,7 @@
     <RootNamespace>FNIRSI_DPS_150_CONTROL</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <StartupObject>FNIRSI_DPS_150_CONTROL.TestProgram</StartupObject>
+    <StartupObject>FNIRSI_DPS_150_CONTROL.Program</StartupObject>
   </PropertyGroup>
 
   <ItemGroup>

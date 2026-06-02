@@ -1,3 +1,4 @@
-<Solution>
-  <Project Path="FNIRSI-DPS-150-CONTROL/FNIRSI-DPS-150-CONTROL.csproj" />
+﻿<Solution>
+  <Project Path="src\FNIRSI-DPS-150-CONTROL\FNIRSI-DPS-150-CONTROL.csproj" />
+  <Project Path="tests\FNIRSI-DPS-150-CONTROL.Tests\FNIRSI-DPS-150-CONTROL.Tests.csproj" />
 </Solution>

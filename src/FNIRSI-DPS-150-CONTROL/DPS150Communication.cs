@@ -320,13 +320,14 @@ namespace FNIRSI_DPS_150_CONTROL
         /// This is a convenience method that combines SendData() and ReadResponse() in a thread-safe manner.
         /// The entire operation (send and receive) is locked to prevent interference from other threads.
         /// </remarks>
-        public byte[]? SendCommandAndGetResponse(byte[]? data = null, int timeoutMs = 1000)
+        public byte[]? SendDataAndGetResponse(byte[]? data = null, int timeoutMs = 1000)
         {
             lock (_lockObject)
             {
                 if (_serialPort?.IsOpen != true)
                     return null;
                     
+                _serialPort.DiscardOutBuffer(); // Clear any unsent data before sending a new command
                 _serialPort.DiscardInBuffer(); // Clear any existing data before sending a new command
 
                 if (!SendData(data))

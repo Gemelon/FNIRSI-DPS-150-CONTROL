@@ -654,10 +654,10 @@ namespace FNIRSI_DPS_150_CONTROL
             {
                 float voltage = float.Parse(input, System.Globalization.CultureInfo.InvariantCulture);
 
-                // Validate voltage range (typical DPS-150 range: 0-150V)
-                if (voltage < 0 || voltage > 150)
+                // Validate voltage range (typical DPS-150 range: 0-30V)
+                if (voltage < 0 || voltage > 30)
                 {
-                    Console.WriteLine("⚠ Warning: Voltage out of typical range (0-150V)");
+                    Console.WriteLine("⚠ Warning: Voltage out of typical range (0-30V)");
                     Console.Write("Continue anyway? (Y/N): ");
                     string? confirm = Console.ReadLine()?.ToUpper();
                     if (confirm != "Y")
@@ -719,10 +719,10 @@ namespace FNIRSI_DPS_150_CONTROL
                         {
                             float current = float.Parse(input, System.Globalization.CultureInfo.InvariantCulture);
 
-                            // Validate current range (typical DPS-150 range: 0-15A)
-                            if (current < 0 || current > 15)
+                            // Validate current range (typical DPS-150 range: 0-5A)
+                            if (current < 0 || current > 5)
                             {
-                                Console.WriteLine("⚠ Warning: Current out of typical range (0-15A)");
+                                Console.WriteLine("⚠ Warning: Current out of typical range (0-5A)");
                                 Console.Write("Continue anyway? (Y/N): ");
                                 string? confirm = Console.ReadLine()?.ToUpper();
                                 if (confirm != "Y")
