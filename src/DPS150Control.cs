@@ -577,7 +577,7 @@ namespace FNIRSI_DPS_150_CONTROL
                 throw new InvalidOperationException("Device is not connected. Call ConnectToDevice first.");
 
             // Load and validate profile
-            var profile = ChargingProfile.LoadFromFile(yamlFilePath);
+            var profile = DPS150ChargingProfile.LoadFromFile(yamlFilePath);
             profile.Validate();
 
             // Execute each step

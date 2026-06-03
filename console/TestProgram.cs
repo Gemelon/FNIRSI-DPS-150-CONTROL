@@ -29,12 +29,12 @@ namespace FNIRSI_DPS_150_CONTROL
     /// Comprehensive test application for DPS150Control class.
     /// Tests all implemented methods and features.
     /// </summary>
-    class TestProgram
+    public class TestProgram
     {
         private static DPS150Control? _control;
         private static bool _isRunning = true;
 
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {
             Console.OutputEncoding = System.Text.Encoding.UTF8;
             Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
@@ -113,7 +113,6 @@ namespace FNIRSI_DPS_150_CONTROL
             Console.WriteLine("│  COMPREHENSIVE TESTS                                         │");
             Console.WriteLine("│  [T] Run Complete Test Suite                                │");
             Console.WriteLine("│  [F] Run Full Device Control Test                           │");
-            Console.WriteLine("│  [X] Test Float Endianness (IEEE-754)                       │");
             Console.WriteLine(new string('─', 62));
             Console.WriteLine("│  [0] Exit Application                                       │");
             Console.WriteLine(new string('═', 62));
@@ -208,9 +207,6 @@ namespace FNIRSI_DPS_150_CONTROL
                     break;
                 case "F":
                     RunFullDeviceControlTest();
-                    break;
-                case "X":
-                    FloatEndiannessTest.RunTest();
                     break;
                 case "0":
                     _isRunning = false;

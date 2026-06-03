@@ -20,118 +20,132 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-using System;
+using Xunit;
+using Xunit.Abstractions;
 
-namespace FNIRSI_DPS_150_CONTROL
+namespace FNIRSI_DPS_150_CONTROL.Tests
 {
     /// <summary>
-    /// Test class to verify the endianness of float values in the DPS-150 protocol.
+    /// xUnit tests to verify the endianness of float values in the DPS-150 protocol.
     /// According to the protocol documentation:
     /// Voltage Setpoint (C1): F1 B1 C1 04 CD CC 44 41 E3
-    /// Where CD CC 44 41 are the float bytes.
+    /// Where CD CC 44 41 are the float bytes representing 12.30V.
     /// </summary>
-    public static class FloatEndiannessTest
+    public class FloatEndiannessTests
     {
-        public static void RunTest()
+        private readonly ITestOutputHelper _output;
+        private readonly byte[] _protocolBytes = new byte[] { 0xCD, 0xCC, 0x44, 0x41 };
+        private const float ExpectedVoltage = 12.30f;
+        private const float Tolerance = 0.01f;
+
+        public FloatEndiannessTests(ITestOutputHelper output)
         {
-            Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
-            Console.WriteLine("║ DPS-150 FLOAT ENDIANNESS TEST                                ║");
-            Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
-            Console.WriteLine();
+            _output = output;
+        }
 
-            // From protocol documentation:
-            // TX: F1 B1 C1 04 CD CC 44 41 E3
-            // The float bytes are: CD CC 44 41
-            byte[] protocolBytes = new byte[] { 0xCD, 0xCC, 0x44, 0x41 };
+        [Fact]
+        public void LittleEndian_Interpretation_ShouldMatch_ProtocolValue()
+        {
+            // Arrange
+            _output.WriteLine("Testing Little-Endian interpretation of protocol bytes");
+            _output.WriteLine($"Protocol bytes: {BitConverter.ToString(_protocolBytes)}");
 
-            Console.WriteLine("Protocol bytes (from documentation):");
-            Console.WriteLine($"  Hex: {BitConverter.ToString(protocolBytes)}");
-            Console.WriteLine();
+            // Act
+            float value = BitConverter.ToSingle(_protocolBytes, 0);
+            _output.WriteLine($"Interpreted value: {value:F2}V");
+            _output.WriteLine($"Expected value: {ExpectedVoltage:F2}V");
 
-            // Test 1: Little-endian (direct interpretation)
-            float littleEndianValue = BitConverter.ToSingle(protocolBytes, 0);
-            Console.WriteLine("Test 1: Little-Endian Interpretation");
-            Console.WriteLine($"  Value: {littleEndianValue:F2}V");
-            Console.WriteLine($"  Expected: 12.30V (common test value)");
-            Console.WriteLine($"  Match: {(Math.Abs(littleEndianValue - 12.30f) < 0.01f ? "✓ YES" : "✗ NO")}");
-            Console.WriteLine();
+            // Assert
+            Assert.InRange(value, ExpectedVoltage - Tolerance, ExpectedVoltage + Tolerance);
+        }
 
-            // Test 2: Big-endian (reversed interpretation)
+        [Fact]
+        public void BigEndian_Interpretation_ShouldNotMatch_ProtocolValue()
+        {
+            // Arrange
             byte[] reversedBytes = new byte[4];
-            Array.Copy(protocolBytes, reversedBytes, 4);
+            Array.Copy(_protocolBytes, reversedBytes, 4);
             Array.Reverse(reversedBytes);
-            float bigEndianValue = BitConverter.ToSingle(reversedBytes, 0);
-            Console.WriteLine("Test 2: Big-Endian Interpretation");
-            Console.WriteLine($"  Value: {bigEndianValue:F2}V");
-            Console.WriteLine($"  Expected: 12.30V (common test value)");
-            Console.WriteLine($"  Match: {(Math.Abs(bigEndianValue - 12.30f) < 0.01f ? "✓ YES" : "✗ NO")}");
-            Console.WriteLine();
+            _output.WriteLine("Testing Big-Endian interpretation (reversed bytes)");
+            _output.WriteLine($"Reversed bytes: {BitConverter.ToString(reversedBytes)}");
 
-            // Test 3: Round-trip test with current FloatToBytes implementation
-            Console.WriteLine("Test 3: Current FloatToBytes Implementation (Big-Endian)");
+            // Act
+            float value = BitConverter.ToSingle(reversedBytes, 0);
+            _output.WriteLine($"Interpreted value: {value}");
+
+            // Assert - Big-endian should NOT match the expected voltage
+            Assert.False(Math.Abs(value - ExpectedVoltage) < Tolerance,
+                "Big-endian interpretation should not match expected voltage");
+        }
+
+        [Fact]
+        public void BitConverter_GetBytes_ShouldProduce_ProtocolBytes()
+        {
+            // Arrange
             float testValue = 12.3f;
-            byte[] currentImplBytes = FloatToBytesBigEndian(testValue);
-            Console.WriteLine($"  Input: {testValue:F2}V");
-            Console.WriteLine($"  Output bytes: {BitConverter.ToString(currentImplBytes)}");
-            Console.WriteLine($"  Expected: {BitConverter.ToString(protocolBytes)}");
-            Console.WriteLine($"  Match: {(ByteArraysEqual(currentImplBytes, protocolBytes) ? "✓ YES" : "✗ NO")}");
-            Console.WriteLine();
+            _output.WriteLine($"Converting {testValue:F2}V to bytes using BitConverter.GetBytes()");
 
-            // Test 4: Round-trip test with little-endian (direct BitConverter)
-            Console.WriteLine("Test 4: Corrected Implementation (Little-Endian)");
-            byte[] littleEndianBytes = BitConverter.GetBytes(testValue);
-            Console.WriteLine($"  Input: {testValue:F2}V");
-            Console.WriteLine($"  Output bytes: {BitConverter.ToString(littleEndianBytes)}");
-            Console.WriteLine($"  Expected: {BitConverter.ToString(protocolBytes)}");
-            Console.WriteLine($"  Match: {(ByteArraysEqual(littleEndianBytes, protocolBytes) ? "✓ YES" : "✗ NO")}");
-            Console.WriteLine();
+            // Act
+            byte[] resultBytes = BitConverter.GetBytes(testValue);
+            _output.WriteLine($"Result bytes: {BitConverter.ToString(resultBytes)}");
+            _output.WriteLine($"Expected bytes: {BitConverter.ToString(_protocolBytes)}");
 
-            // Test 5: Round-trip verification
-            Console.WriteLine("Test 5: Round-Trip Verification");
-            float roundTripValue = BitConverter.ToSingle(protocolBytes, 0);
-            byte[] roundTripBytes = BitConverter.GetBytes(roundTripValue);
-            Console.WriteLine($"  Protocol bytes → float → bytes");
-            Console.WriteLine($"  {BitConverter.ToString(protocolBytes)} → {roundTripValue:F2}V → {BitConverter.ToString(roundTripBytes)}");
-            Console.WriteLine($"  Round-trip successful: {(ByteArraysEqual(protocolBytes, roundTripBytes) ? "✓ YES" : "✗ NO")}");
-            Console.WriteLine();
-
-            // Conclusion
-            Console.WriteLine("═══════════════════════════════════════════════════════════════");
-            Console.WriteLine("CONCLUSION:");
-            if (ByteArraysEqual(littleEndianBytes, protocolBytes))
-            {
-                Console.WriteLine("✓ The DPS-150 protocol uses LITTLE-ENDIAN byte order!");
-                Console.WriteLine("  FloatToBytes should use: BitConverter.GetBytes(value)");
-                Console.WriteLine("  (no byte reversal needed on little-endian systems)");
-            }
-            else if (ByteArraysEqual(currentImplBytes, protocolBytes))
-            {
-                Console.WriteLine("✓ The DPS-150 protocol uses BIG-ENDIAN byte order!");
-                Console.WriteLine("  Current FloatToBytes implementation is CORRECT.");
-            }
-            else
-            {
-                Console.WriteLine("✗ Unable to determine byte order from test data.");
-            }
-            Console.WriteLine("═══════════════════════════════════════════════════════════════");
+            // Assert
+            Assert.Equal(_protocolBytes, resultBytes);
         }
 
-        private static byte[] FloatToBytesBigEndian(float value)
+        [Fact]
+        public void RoundTrip_LittleEndian_ShouldPreserve_OriginalValue()
         {
-            byte[] bytes = BitConverter.GetBytes(value);
-            if (BitConverter.IsLittleEndian)
-                Array.Reverse(bytes);
-            return bytes;
+            // Arrange
+            _output.WriteLine("Testing round-trip: bytes → float → bytes");
+
+            // Act
+            float value = BitConverter.ToSingle(_protocolBytes, 0);
+            byte[] roundTripBytes = BitConverter.GetBytes(value);
+
+            _output.WriteLine($"Original bytes: {BitConverter.ToString(_protocolBytes)}");
+            _output.WriteLine($"Float value: {value:F2}V");
+            _output.WriteLine($"Round-trip bytes: {BitConverter.ToString(roundTripBytes)}");
+
+            // Assert
+            Assert.Equal(_protocolBytes, roundTripBytes);
         }
 
-        private static bool ByteArraysEqual(byte[] a, byte[] b)
+        [Theory]
+        [InlineData(12.3f, new byte[] { 0xCD, 0xCC, 0x44, 0x41 })]
+        [InlineData(5.0f, new byte[] { 0x00, 0x00, 0xA0, 0x40 })]
+        [InlineData(0.0f, new byte[] { 0x00, 0x00, 0x00, 0x00 })]
+        public void FloatToBytes_WithVariousValues_ShouldMatch_ExpectedBytes(float voltage, byte[] expectedBytes)
         {
-            if (a.Length != b.Length) return false;
-            for (int i = 0; i < a.Length; i++)
-            {
-                if (a[i] != b[i]) return false;
-            }
-            return true;
+            // Arrange
+            _output.WriteLine($"Testing voltage: {voltage:F2}V");
+
+            // Act
+            byte[] resultBytes = BitConverter.GetBytes(voltage);
+            _output.WriteLine($"Result bytes: {BitConverter.ToString(resultBytes)}");
+            _output.WriteLine($"Expected bytes: {BitConverter.ToString(expectedBytes)}");
+
+            // Assert
+            Assert.Equal(expectedBytes, resultBytes);
+        }
+
+        [Fact]
+        public void DPS150Protocol_Uses_LittleEndian_ByteOrder()
+        {
+            // This test documents the conclusion that DPS-150 uses little-endian
+            _output.WriteLine("═══════════════════════════════════════════════════════════════");
+            _output.WriteLine("VERIFIED: The DPS-150 protocol uses LITTLE-ENDIAN byte order!");
+            _output.WriteLine("FloatToBytes should use: BitConverter.GetBytes(value)");
+            _output.WriteLine("(no byte reversal needed on little-endian systems)");
+            _output.WriteLine("═══════════════════════════════════════════════════════════════");
+
+            // Verify with the known protocol example
+            float voltage = BitConverter.ToSingle(_protocolBytes, 0);
+            Assert.InRange(voltage, ExpectedVoltage - Tolerance, ExpectedVoltage + Tolerance);
+
+            byte[] bytes = BitConverter.GetBytes(12.3f);
+            Assert.Equal(_protocolBytes, bytes);
         }
     }
 }
