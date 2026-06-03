@@ -10,7 +10,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="..\..\..\EVE LiFePO4 Charging Profile.yaml" Link="EVE LiFePO4 Charging Profile.yaml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="System.IO.Ports" Version="10.0.8" />
+    <PackageReference Include="YamlDotNet" Version="18.0.0" />
   </ItemGroup>
 
 </Project>

@@ -35,6 +35,8 @@
 //
 
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace FNIRSI_DPS_150_CONTROL
 {
@@ -556,6 +558,342 @@ namespace FNIRSI_DPS_150_CONTROL
 
             byte calculatedChecksum = (byte)(sum & 0xFF);
             return receivedChecksum == calculatedChecksum;
+        }
+
+        #endregion
+
+        #region Charging Profile Execution
+
+        /// <summary>
+        /// Executes a battery charging profile from a YAML file.
+        /// </summary>
+        /// <param name="yamlFilePath">Path to the YAML charging profile file.</param>
+        /// <param name="cancellationToken">Cancellation token to stop the charging process.</param>
+        /// <returns>Task that completes when the charging profile is finished or cancelled.</returns>
+        /// <exception cref="InvalidOperationException">Thrown if device is not connected or profile is invalid.</exception>
+        public async Task ExecuteChargingProfileAsync(string yamlFilePath, CancellationToken cancellationToken = default)
+        {
+            if (!IsConnected)
+                throw new InvalidOperationException("Device is not connected. Call ConnectToDevice first.");
+
+            // Load and validate profile
+            var profile = ChargingProfile.LoadFromFile(yamlFilePath);
+            profile.Validate();
+
+            // Execute each step
+            for (int i = 0; i < profile.CycleSteps.Count; i++)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
+                var step = profile.CycleSteps[i];
+                await ExecuteChargingStepAsync(step, i, profile.CycleSteps.Count, profile.CorrectionVoltage, cancellationToken);
+            }
+
+            // Turn off output when done
+            OutputRelayState = false;
+        }
+
+        /// <summary>
+        /// Executes a single charging step.
+        /// </summary>
+        private async Task ExecuteChargingStepAsync(CycleStep step, int stepIndex, int totalSteps, 
+            float correctionVoltage, CancellationToken cancellationToken)
+        {
+            var startTime = DateTime.Now;
+
+            // Raise step started event
+            OnChargingStepStarted(new ChargingStepStartedEventArgs(stepIndex, totalSteps, step));
+
+            string completionReason = "Unknown";
+            float finalVoltage = 0f;
+            float finalCurrent = 0f;
+
+            try
+            {
+                switch (step.Mode)
+                {
+                    case ChargingMode.ConstantCurrent:
+                        (completionReason, finalVoltage, finalCurrent) = await ExecuteCCModeAsync(step, correctionVoltage, cancellationToken);
+                        break;
+
+                    case ChargingMode.ConstantVoltage:
+                        (completionReason, finalVoltage, finalCurrent) = await ExecuteCVModeAsync(step, cancellationToken);
+                        break;
+
+                    case ChargingMode.Wait:
+                        (completionReason, finalVoltage, finalCurrent) = await ExecuteWaitModeAsync(step, cancellationToken);
+                        break;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                completionReason = "Cancelled";
+                finalVoltage = MeasuredVoltage;
+                finalCurrent = MeasuredCurrent;
+            }
+            finally
+            {
+                // Raise step completed event
+                OnChargingStepCompleted(new ChargingStepCompletedEventArgs(
+                    stepIndex, totalSteps, step, startTime, completionReason, finalVoltage, finalCurrent));
+            }
+        }
+
+        /// <summary>
+        /// Executes a Constant Current (CC) charging step.
+        /// </summary>
+        private async Task<(string reason, float voltage, float current)> ExecuteCCModeAsync(
+            CycleStep step, float correctionVoltage, CancellationToken cancellationToken)
+        {
+            if (!step.Current.HasValue || !step.CutOffVoltage.HasValue)
+                throw new InvalidOperationException("CC mode requires Current and CutOffVoltage.");
+
+            // Configure device for CC mode
+            CurrentLimit = step.Current.Value;
+            VoltageSetpoint = 30.0f; // Set to maximum, current limit will control
+            OutputRelayState = true;
+
+            var effectiveCutOff = step.CutOffVoltage.Value + correctionVoltage;
+            var startTime = DateTime.Now;
+            var maxDuration = step.MaxTime ?? TimeSpan.FromHours(24); // Default 24h timeout
+
+            // Monitor until cut-off voltage is reached or timeout
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(250, cancellationToken); // Poll every 250ms
+
+                var measuredVoltage = MeasuredVoltage;
+                var measuredCurrent = MeasuredCurrent;
+
+                // Check cut-off condition
+                if (measuredVoltage >= effectiveCutOff)
+                {
+                    return ("CutOff voltage reached", measuredVoltage, measuredCurrent);
+                }
+
+                // Check timeout
+                if (DateTime.Now - startTime >= maxDuration)
+                {
+                    return ("MaxTime timeout", measuredVoltage, measuredCurrent);
+                }
+            }
+
+            return ("Cancelled", MeasuredVoltage, MeasuredCurrent);
+        }
+
+        /// <summary>
+        /// Executes a Constant Voltage (CV) charging step.
+        /// </summary>
+        private async Task<(string reason, float voltage, float current)> ExecuteCVModeAsync(
+            CycleStep step, CancellationToken cancellationToken)
+        {
+            if (!step.Voltage.HasValue)
+                throw new InvalidOperationException("CV mode requires Voltage.");
+
+            // Configure device for CV mode
+            VoltageSetpoint = step.Voltage.Value;
+            CurrentLimit = step.Current ?? 5.0f; // Use specified current or max
+            OutputRelayState = true;
+
+            var startTime = DateTime.Now;
+            var maxDuration = step.MaxTime ?? TimeSpan.FromHours(24); // Default 24h timeout
+
+            // Determine end condition
+            var hasTimeDuration = step.Time.HasValue;
+            var hasCutOffCurrent = step.CutOffCurrent.HasValue;
+            var isIndefinite = step.TimeString?.Equals("Indefinite", StringComparison.OrdinalIgnoreCase) ?? false;
+
+            // Monitor until cut-off current or time is reached
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(250, cancellationToken); // Poll every 250ms
+
+                var measuredVoltage = MeasuredVoltage;
+                var measuredCurrent = MeasuredCurrent;
+                var elapsed = DateTime.Now - startTime;
+
+                // Check cut-off current condition
+                if (hasCutOffCurrent && measuredCurrent <= step.CutOffCurrent!.Value)
+                {
+                    return ("CutOff current reached", measuredVoltage, measuredCurrent);
+                }
+
+                // Check time duration condition
+                if (hasTimeDuration && elapsed >= step.Time!.Value)
+                {
+                    return ("Time duration completed", measuredVoltage, measuredCurrent);
+                }
+
+                // Check timeout
+                if (!isIndefinite && elapsed >= maxDuration)
+                {
+                    return ("MaxTime timeout", measuredVoltage, measuredCurrent);
+                }
+
+                // Indefinite mode - only exit on cancellation
+                if (isIndefinite)
+                {
+                    // Continue until cancelled
+                }
+            }
+
+            return ("Cancelled", MeasuredVoltage, MeasuredCurrent);
+        }
+
+        /// <summary>
+        /// Executes a Wait/Rest step.
+        /// </summary>
+        private async Task<(string reason, float voltage, float current)> ExecuteWaitModeAsync(
+            CycleStep step, CancellationToken cancellationToken)
+        {
+            if (!step.Time.HasValue)
+                throw new InvalidOperationException("WAIT mode requires Time.");
+
+            // Turn off output during rest
+            OutputRelayState = false;
+
+            var startTime = DateTime.Now;
+            var duration = step.Time.Value;
+
+            // Wait for specified duration
+            try
+            {
+                await Task.Delay(duration, cancellationToken);
+                return ("Wait time completed", MeasuredVoltage, MeasuredCurrent);
+            }
+            catch (OperationCanceledException)
+            {
+                return ("Cancelled", MeasuredVoltage, MeasuredCurrent);
+            }
+        }
+
+        #endregion
+
+        #region Charging Profile Events
+
+        /// <summary>
+        /// Event arguments for charging step started event.
+        /// </summary>
+        public class ChargingStepStartedEventArgs : EventArgs
+        {
+            /// <summary>
+            /// The index of the step (0-based).
+            /// </summary>
+            public int StepIndex { get; set; }
+
+            /// <summary>
+            /// Total number of steps in the profile.
+            /// </summary>
+            public int TotalSteps { get; set; }
+
+            /// <summary>
+            /// The cycle step that is starting.
+            /// </summary>
+            public CycleStep Step { get; set; }
+
+            /// <summary>
+            /// Timestamp when the step started.
+            /// </summary>
+            public DateTime StartTime { get; set; }
+
+            public ChargingStepStartedEventArgs(int stepIndex, int totalSteps, CycleStep step)
+            {
+                StepIndex = stepIndex;
+                TotalSteps = totalSteps;
+                Step = step;
+                StartTime = DateTime.Now;
+            }
+        }
+
+        /// <summary>
+        /// Event arguments for charging step completed event.
+        /// </summary>
+        public class ChargingStepCompletedEventArgs : EventArgs
+        {
+            /// <summary>
+            /// The index of the completed step (0-based).
+            /// </summary>
+            public int StepIndex { get; set; }
+
+            /// <summary>
+            /// Total number of steps in the profile.
+            /// </summary>
+            public int TotalSteps { get; set; }
+
+            /// <summary>
+            /// The cycle step that completed.
+            /// </summary>
+            public CycleStep Step { get; set; }
+
+            /// <summary>
+            /// Timestamp when the step started.
+            /// </summary>
+            public DateTime StartTime { get; set; }
+
+            /// <summary>
+            /// Timestamp when the step completed.
+            /// </summary>
+            public DateTime EndTime { get; set; }
+
+            /// <summary>
+            /// Duration of the step.
+            /// </summary>
+            public TimeSpan Duration => EndTime - StartTime;
+
+            /// <summary>
+            /// Reason why the step completed (e.g., "CutOff reached", "Timeout", "Cancelled").
+            /// </summary>
+            public string CompletionReason { get; set; }
+
+            /// <summary>
+            /// Final measured voltage when the step completed.
+            /// </summary>
+            public float FinalVoltage { get; set; }
+
+            /// <summary>
+            /// Final measured current when the step completed.
+            /// </summary>
+            public float FinalCurrent { get; set; }
+
+            public ChargingStepCompletedEventArgs(int stepIndex, int totalSteps, CycleStep step, 
+                DateTime startTime, string reason, float voltage, float current)
+            {
+                StepIndex = stepIndex;
+                TotalSteps = totalSteps;
+                Step = step;
+                StartTime = startTime;
+                EndTime = DateTime.Now;
+                CompletionReason = reason;
+                FinalVoltage = voltage;
+                FinalCurrent = current;
+            }
+        }
+
+        /// <summary>
+        /// Event raised when a charging step starts.
+        /// </summary>
+        public event EventHandler<ChargingStepStartedEventArgs>? ChargingStepStarted;
+
+        /// <summary>
+        /// Event raised when a charging step completes.
+        /// </summary>
+        public event EventHandler<ChargingStepCompletedEventArgs>? ChargingStepCompleted;
+
+        /// <summary>
+        /// Raises the ChargingStepStarted event.
+        /// </summary>
+        protected virtual void OnChargingStepStarted(ChargingStepStartedEventArgs e)
+        {
+            ChargingStepStarted?.Invoke(this, e);
+        }
+
+        /// <summary>
+        /// Raises the ChargingStepCompleted event.
+        /// </summary>
+        protected virtual void OnChargingStepCompleted(ChargingStepCompletedEventArgs e)
+        {
+            ChargingStepCompleted?.Invoke(this, e);
         }
 
         #endregion
