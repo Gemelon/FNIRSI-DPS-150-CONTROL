@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-	<ProjectReference Include="..\..\src\FNIRSI-DPS-150-CONTROL\FNIRSI-DPS-150-CONTROL.csproj" />
+	<ProjectReference Include="..\..\src\FNIRSI-DPS-150-CONTROL.csproj" />
   </ItemGroup>
 
   <ItemGroup>
